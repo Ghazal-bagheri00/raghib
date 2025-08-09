@@ -8,7 +8,7 @@ const AppContext = createContext<any>(null);
 
 // Dummy data is imported from `src/data/dummy.ts` as `initialDummyShopData`
 
-const formatPrice = (price: number) => `${price.toLocaleString()} تومان`;
+const formatPrice = (price: number) => `${Math.round(price / 10).toLocaleString()} تومان`;
 
 const LoadingSpinner = () => (
   <div className="flex justify-center items-center py-4">
@@ -376,7 +376,76 @@ const ProductDetail = () => {
     }
   }, [selectedProduct, navigate]);
 
-  const productSimilars = selectedProduct ? dummyShopData.similars[selectedProduct.id] || [] : [];
+  // Similar products from real API search
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isLoadingSearch, setIsLoadingSearch] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+
+  // Map search API response to internal format
+  const mapSearchProduct = (p: any) => {
+    const id = String(p?.id ?? '');
+    const title = String(p?.name ?? '');
+    const price = Number(p?.price ?? 0);
+    const primaryPhoto = p?.photo?.MEDIUM || p?.photo?.SMALL || p?.photo?.LARGE || p?.photo?.EXTRA_SMALL || 'https://placehold.co/200x200/cccccc/333333?text=No+Image';
+    const vendorIdentifier = p?.vendor?.identifier || 'shop';
+    const basalamUrl = `https://basalam.com/${vendorIdentifier}/product/${id}`;
+    const ratingAvg = p?.rating?.average;
+    const ratingCount = p?.rating?.count;
+    const categoryTitle = p?.categoryTitle;
+    const descriptionParts: string[] = [];
+    if (categoryTitle) descriptionParts.push(String(categoryTitle));
+    if (ratingAvg != null && ratingCount != null) descriptionParts.push(`امتیاز ${ratingAvg} (${ratingCount})`);
+    const description = descriptionParts.join(' • ') || 'بدون توضیحات';
+    return {
+      id,
+      title,
+      price,
+      photo_id: primaryPhoto,
+      description,
+      basalamUrl,
+      isCompetitor: false, // Default to false, can be toggled
+      createdAt: new Date().toISOString(),
+    } as any;
+  };
+
+  // Fetch similar products from search API
+  useEffect(() => {
+    if (!selectedProduct || !basalamToken || !selectedProduct.title || !selectedProduct.id) {
+      setSearchResults([]);
+      return;
+    }
+    let cancelled = false;
+    const fetchSimilarProducts = async () => {
+      setIsLoadingSearch(true);
+      setSearchError(null);
+      try {
+        const encodedTitle = encodeURIComponent(selectedProduct.title.trim());
+        const productId = encodeURIComponent(String(selectedProduct.id));
+        const url = `https://bardiafarser.app.n8n.cloud/webhook/mlt-search?title=${encodedTitle}&product_id=${productId}&page=1`;
+        const res = await authorizedFetch(url);
+        let data: any = null;
+        try { data = await res.json(); } catch {}
+        if (!res.ok) {
+          const message = (data && (data.message || data.error)) || 'خطا در جستجوی محصولات مشابه';
+          throw new Error(message);
+        }
+        const products = Array.isArray(data?.products) ? data.products.map(mapSearchProduct).filter(p => p.id && p.title) : [];
+        if (!cancelled) {
+          setSearchResults(products);
+        }
+      } catch (e: any) {
+        if (!cancelled) setSearchError(e?.message || 'خطای نامشخص در جستجو');
+      } finally {
+        if (!cancelled) setIsLoadingSearch(false);
+      }
+    };
+    // Add a small delay to avoid too many requests on rapid navigation
+    const timer = setTimeout(fetchSimilarProducts, 300);
+    return () => { 
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [selectedProduct, basalamToken, authorizedFetch]);
 
   // Fresh, simplified competitor fetch: rely solely on webhook + Basalam core; ignore dummy data
   useEffect(() => {
@@ -477,20 +546,16 @@ const ProductDetail = () => {
   }, [showSimilars]);
 
   const addAsCompetitor = (similarProduct: any) => {
-    setDummyShopData((prevData: any) => {
-      const newSimilars = { ...prevData.similars };
-      if (newSimilars[selectedProduct.id]) {
-        newSimilars[selectedProduct.id] = newSimilars[selectedProduct.id].map((s: any) =>
-          s.id === similarProduct.id ? { ...s, isCompetitor: !s.isCompetitor } : s
-        );
-      }
-      return { ...prevData, similars: newSimilars };
-    });
+    setSearchResults((prevResults) => 
+      prevResults.map((s: any) =>
+        s.id === similarProduct.id ? { ...s, isCompetitor: !s.isCompetitor } : s
+      )
+    );
     setToast({ message: `وضعیت رقیب برای "${similarProduct.title}" تغییر کرد`, type: 'success' });
     setTimeout(() => setToast(null), 2000);
   };
 
-  const sortedSimilars = productSimilars
+  const sortedSimilars = searchResults
     .filter((p: any) => {
       if (!filterOnlyCheaper) return true;
       if (!selectedProduct) return true;
@@ -665,11 +730,22 @@ const ProductDetail = () => {
                       {average > 0 && (
                         <div className="text-sm text-gray-700">
                           <span className="font-semibold">میانگین قیمت رقبا:</span> {formatPrice(average)}
-                        </div>
-                      )}
+                  </div>
+                )}
                     </div>
                   );
                 })()}
+
+                {/* Edit Now Button */}
+                <div className="mt-4 mb-3">
+                  <button
+                    onClick={() => window.open(`https://vendor.basalam.com/edit-product/${selectedProduct.id}`, '_blank')}
+                    className="w-full py-3 px-4 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition duration-200 ease-in-out shadow-sm flex items-center justify-center gap-2"
+                  >
+                    <Wrench size={18} />
+                    ویرایش محصول
+                  </button>
+                </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   {confirmedCompetitorDetails.map((comp) => {
@@ -695,7 +771,7 @@ const ProductDetail = () => {
                           onClick={() => window.open(comp.productUrl || `https://basalam.com/product/${comp.id}`, '_blank')}
                         >
                           مشاهده در باسلام
-                        </button>
+                  </button>
                       </div>
                     );
                   })}
@@ -720,8 +796,12 @@ const ProductDetail = () => {
         {showSimilars && (
           <>
             <div ref={similarsContainerRef} className="bg-white p-4 rounded-xl shadow-md mb-4">
-              <h3 className="text-lg font-bold text-gray-800 mb-3">محصولات مشابه (از جستجو Basalam)</h3>
-              {sortedSimilars.length > 0 ? (
+              <h3 className="text-lg font-bold text-gray-800 mb-3">محصولات مشابه (از جستجوی زنده Basalam)</h3>
+              {isLoadingSearch ? (
+                <LoadingSpinner />
+              ) : searchError ? (
+                <p className="text-red-600 text-sm text-center py-4">{searchError}</p>
+              ) : sortedSimilars.length > 0 ? (
                 <div className="grid grid-cols-2 gap-4">
                   {sortedSimilars.slice(0, visibleSimilarsCount).map((similar: any, idx: number) => (
                     <div
@@ -748,7 +828,7 @@ const ProductDetail = () => {
                         className="absolute top-2 left-2 p-1 rounded-full bg-white/90 border hover:bg-white"
                         onClick={(e) => {
                           e.stopPropagation();
-                          window.open(selectedProduct.basalamUrl, '_blank');
+                          window.open(similar.basalamUrl, '_blank');
                         }}
                         title="مشاهده در باسلام"
                       >
@@ -760,7 +840,7 @@ const ProductDetail = () => {
                         className="mt-3 w-full py-2 px-3 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition duration-200 ease-in-out shadow-sm"
                         onClick={(e) => {
                           e.stopPropagation();
-                          window.open(selectedProduct.basalamUrl, '_blank');
+                          window.open(similar.basalamUrl, '_blank');
                         }}
                       >
                         مشاهده در باسلام
@@ -1069,13 +1149,13 @@ const App = () => {
   }, [basalamToken]);
 
   const contextValue = useMemo(() => ({
-    navigate,
-    selectedProduct,
-    setSelectedProduct,
-    basalamToken,
-    setBasalamToken,
-    dummyShopData,
-    setDummyShopData,
+        navigate,
+        selectedProduct,
+        setSelectedProduct,
+        basalamToken,
+        setBasalamToken,
+        dummyShopData,
+        setDummyShopData,
     authorizedFetch,
   }), [navigate, selectedProduct, basalamToken, dummyShopData, authorizedFetch]);
 
