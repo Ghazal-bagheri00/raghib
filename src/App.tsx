@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useContext, createContext, useRef, useCallback, useMemo } from 'react';
 import { Search, ChevronLeft, Package, Sparkles, AlertCircle, Eye, EyeOff, Settings, X, ExternalLink, Wrench, SlidersHorizontal, RotateCcw, BadgeCheck } from 'lucide-react';
-import type { ShopData } from './types';
-import { dummyShopData as initialDummyShopData } from './data/dummy';
+
+
 
 // Loosely typed app context for speed; can be refined later
 const AppContext = createContext<any>(null);
 
-// Dummy data is imported from `src/data/dummy.ts` as `initialDummyShopData`
+
 
 const formatPrice = (price: number) => `${Math.round(price / 10).toLocaleString()} تومان`;
 
@@ -15,6 +15,19 @@ const LoadingSpinner = () => (
     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
   </div>
 );
+
+const GlobalLoadingOverlay = ({ isLoading }: { isLoading: boolean }) => {
+  if (!isLoading) return null;
+  
+  return (
+    <div className="fixed inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-30">
+      <div className="bg-white rounded-xl shadow-xl p-8 flex flex-col items-center gap-4 border border-gray-200">
+        <div className="animate-spin rounded-full h-12 w-12 border-4 border-emerald-500 border-t-transparent"></div>
+        <p className="text-gray-700 font-medium">در حال بارگذاری...</p>
+      </div>
+    </div>
+  );
+};
 
 const Modal = ({ isOpen, onClose, title, message, children }: any) => {
   if (!isOpen) return null;
@@ -44,67 +57,7 @@ const Modal = ({ isOpen, onClose, title, message, children }: any) => {
   );
 };
 
-const DevTools = () => {
-  const { dummyShopData, setDummyShopData } = useContext(AppContext);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [jsonText, setJsonText] = useState(JSON.stringify(dummyShopData, null, 2));
-  const [error, setError] = useState('');
 
-  useEffect(() => {
-    setJsonText(JSON.stringify(dummyShopData, null, 2));
-  }, [dummyShopData]);
-
-  const handleCopy = () => {
-    navigator.clipboard
-      .writeText(jsonText)
-      .then(() => alert('JSON copied to clipboard!'))
-      .catch((err) => alert('Failed to copy JSON: ' + err));
-  };
-
-  const handleModify = () => {
-    try {
-      const parsed = JSON.parse(jsonText);
-      setDummyShopData(parsed);
-      setError('');
-      setIsModalOpen(false);
-      alert('Dummy data updated successfully!');
-    } catch (e: any) {
-      setError('Invalid JSON format: ' + e.message);
-    }
-  };
-
-  return (
-    <>
-      <button
-        onClick={() => setIsModalOpen(true)}
-        className="fixed bottom-4 right-4 bg-emerald-200 p-2 rounded-full shadow-lg opacity-20 hover:opacity-100 transition-opacity duration-200 z-50"
-        title="Developer Tools"
-      >
-        <Settings size={20} className="text-emerald-800" />
-      </button>
-
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Developer Tools">
-        <div className="flex flex-col space-y-4">
-          <p className="text-sm text-gray-600">View and modify the dummy JSON data.</p>
-          <textarea
-            className="w-full h-80 p-2 border border-gray-300 rounded-md font-mono text-sm resize-y"
-            value={jsonText}
-            onChange={(e) => setJsonText(e.target.value)}
-          />
-          {error && <p className="text-red-500 text-sm">{error}</p>}
-          <div className="flex justify-end space-x-2">
-            <button onClick={handleCopy} className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition duration-150 ease-in-out">
-              کپی JSON
-            </button>
-            <button onClick={handleModify} className="px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition duration-150 ease-in-out">
-              به روز رسانی JSON
-            </button>
-          </div>
-        </div>
-      </Modal>
-    </>
-  );
-};
 
 const Header = ({ title, onBack, compact = false }: any) => (
   <header className={`sticky top-0 bg-white shadow-sm ${compact ? 'p-2' : 'p-4'} flex items-center justify-between z-40 rounded-b-xl`}>
@@ -145,22 +98,27 @@ const MyProductCard = ({ product, onClick, onBasalamPageClick }: any) => (
 );
 
 const MyProducts = () => {
-  const { navigate, setSelectedProduct, dummyShopData, setDummyShopData, authorizedFetch, basalamToken } = useContext(AppContext);
+  const { navigate, setSelectedProduct, authorizedFetch, basalamToken, setGlobalLoading } = useContext(AppContext);
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
+
   const [displayCount, setDisplayCount] = useState(6);
   const productsRef = useRef<HTMLDivElement | null>(null);
   const [isLoadingApi, setIsLoadingApi] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [myProducts, setMyProducts] = useState<any[]>([]);
 
   // Map API product shape to internal Product type
   const mapApiProduct = (p: any) => {
     const id = String(p?.id ?? '');
     const title = String(p?.name ?? '');
     const price = Number(p?.price ?? 0);
-    const primaryPhoto = p?.photo || p?.photos?.MEDIUM || p?.photos?.SMALL || 'https://placehold.co/200x200/cccccc/333333?text=No+Image';
+    const primaryPhoto = p?.photo?.MEDIUM || p?.photo?.SMALL || p?.photo?.LARGE || p?.photo?.EXTRA_SMALL || p?.photo || p?.photos?.MEDIUM || p?.photos?.SMALL || p?.photos?.LARGE || 'https://placehold.co/200x200/cccccc/333333?text=No+Image';
     const photos: string[] = [];
     if (primaryPhoto) photos.push(primaryPhoto);
+    // Add different photo sizes if available
+    if (p?.photo?.LARGE && !photos.includes(p.photo.LARGE)) photos.push(p.photo.LARGE);
+    if (p?.photo?.MEDIUM && !photos.includes(p.photo.MEDIUM)) photos.push(p.photo.MEDIUM);
+    if (p?.photo?.SMALL && !photos.includes(p.photo.SMALL)) photos.push(p.photo.SMALL);
     if (p?.photos?.MEDIUM && !photos.includes(p.photos.MEDIUM)) photos.push(p.photos.MEDIUM);
     if (p?.photos?.SMALL && !photos.includes(p.photos.SMALL)) photos.push(p.photos.SMALL);
     const vendorIdentifier = p?.vendor?.identifier || 'shop';
@@ -193,6 +151,7 @@ const MyProducts = () => {
       if (fetchedOnceRef.current) return;
       fetchedOnceRef.current = true;
       setIsLoadingApi(true);
+      setGlobalLoading(true);
       setApiError(null);
       try {
         const res = await authorizedFetch('https://bardiafarser.app.n8n.cloud/webhook/my-products');
@@ -204,38 +163,36 @@ const MyProducts = () => {
         }
         const products = Array.isArray(data?.products) ? data.products.map(mapApiProduct) : [];
         if (!cancelled) {
-          setDummyShopData((prev: any) => ({ ...prev, my_products: products, similars: {} }));
+          setMyProducts(products);
         }
       } catch (e: any) {
         if (!cancelled) setApiError(e?.message || 'خطای نامشخص');
       } finally {
-        if (!cancelled) setIsLoadingApi(false);
+        if (!cancelled) {
+          setIsLoadingApi(false);
+          setGlobalLoading(false);
+        }
       }
     };
     fetchProducts();
     return () => { cancelled = true; };
-  }, [authorizedFetch, basalamToken, setDummyShopData]);
+  }, [authorizedFetch, basalamToken, setGlobalLoading]);
 
-  const filteredAndSortedProducts = dummyShopData.my_products
-    .filter((product: any) => product.title.toLowerCase().includes(searchTerm.toLowerCase()))
-    .sort((a: any, b: any) => {
-      const dateA = new Date(a.createdAt);
-      const dateB = new Date(b.createdAt);
-      return sortOrder === 'newest' ? +dateB - +dateA : +dateA - +dateB;
-    });
+  const filteredProducts = myProducts
+    .filter((product: any) => product.title.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  const displayedProducts = filteredAndSortedProducts.slice(0, displayCount);
+  const displayedProducts = filteredProducts.slice(0, displayCount);
 
   const loadMoreProducts = useCallback(() => {
     setTimeout(() => {
-      setDisplayCount((prevCount) => Math.min(prevCount + 6, filteredAndSortedProducts.length));
+      setDisplayCount((prevCount) => Math.min(prevCount + 6, filteredProducts.length));
     }, 300);
-  }, [filteredAndSortedProducts.length]);
+  }, [filteredProducts.length]);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && displayCount < filteredAndSortedProducts.length) {
+        if (entries[0].isIntersecting && displayCount < filteredProducts.length) {
           loadMoreProducts();
         }
       },
@@ -251,7 +208,7 @@ const MyProducts = () => {
         observer.unobserve(productsRef.current);
       }
     };
-  }, [displayCount, filteredAndSortedProducts.length, loadMoreProducts]);
+  }, [displayCount, filteredProducts.length, loadMoreProducts]);
 
   const handleProductClick = (product: any) => {
     setSelectedProduct(product);
@@ -280,25 +237,7 @@ const MyProducts = () => {
           <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
         </div>
 
-        <div className="flex items-center space-x-2 text-sm text-gray-700 justify-end">
-          <span className="font-medium ml-2">مرتب سازی:</span>
-          <button
-            onClick={() => setSortOrder('newest')}
-            className={`px-3 py-1 rounded-full transition-colors duration-200 ${
-              sortOrder === 'newest' ? 'bg-emerald-600 text-white shadow-md' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-            }`}
-          >
-            جدیدترین
-          </button>
-          <button
-            onClick={() => setSortOrder('oldest')}
-            className={`px-3 py-1 rounded-full transition-colors duration-200 ${
-              sortOrder === 'oldest' ? 'bg-emerald-600 text-white shadow-md' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-            }`}
-          >
-            قدیمی ترین
-          </button>
-        </div>
+
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pb-16">
           {displayedProducts.map((product: any) => (
@@ -309,7 +248,7 @@ const MyProducts = () => {
               onBasalamPageClick={(e: any) => handleBasalamPageClick(e, product.basalamUrl)}
             />
           ))}
-          {displayCount < filteredAndSortedProducts.length && (
+          {displayCount < filteredProducts.length && (
             <div ref={productsRef} className="col-span-full">
               <LoadingSpinner />
             </div>
@@ -322,7 +261,7 @@ const MyProducts = () => {
 };
 
 const ProductDetail = () => {
-  const { navigate, selectedProduct, dummyShopData, setDummyShopData, authorizedFetch, basalamToken } = useContext(AppContext);
+  const { navigate, selectedProduct, authorizedFetch, basalamToken, setGlobalLoading } = useContext(AppContext);
   const [showOriginalProductFloating, setShowOriginalProductFloating] = useState(false);
   const [isFloatingExpanded, setIsFloatingExpanded] = useState(false);
   const [showSimilars, setShowSimilars] = useState(false);
@@ -335,8 +274,8 @@ const ProductDetail = () => {
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
   const [tempPercent, setTempPercent] = useState<number>(percentOverAllowance);
   const [isToolsOpen, setIsToolsOpen] = useState(false);
-  const [isMoreSearchOpen, setIsMoreSearchOpen] = useState(false);
-  const [searchMethod, setSearchMethod] = useState<'image' | 'image+title' | 'title'>('image+title');
+
+
   const [visibleSimilarsCount, setVisibleSimilarsCount] = useState(12);
   const similarsContainerRef = useRef<HTMLDivElement | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -344,7 +283,7 @@ const ProductDetail = () => {
   const [applyHidden, setApplyHidden] = useState(true);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [isEyeModalOpen, setIsEyeModalOpen] = useState(false);
-  const [isDevToolsOpen, setIsDevToolsOpen] = useState(false);
+
   // New confirmed competitors (fetched from webhook + Basalam core details)
   type ConfirmedCompetitorDetail = { id: number; title: string; price: number; photo: string; vendorIdentifier: string; productUrl: string };
   const [confirmedCompetitorDetails, setConfirmedCompetitorDetails] = useState<ConfirmedCompetitorDetail[]>([]);
@@ -355,6 +294,8 @@ const ProductDetail = () => {
   const [addingCompetitorIds, setAddingCompetitorIds] = useState<Set<string>>(new Set());
   // Refresh trigger for confirmed competitors
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  // Modal state for competitors
+  const [isCompetitorsModalOpen, setIsCompetitorsModalOpen] = useState(false);
   // Load hidden list per product from localStorage
   useEffect(() => {
     if (!selectedProduct) return;
@@ -422,6 +363,7 @@ const ProductDetail = () => {
     let cancelled = false;
     const fetchSimilarProducts = async () => {
       setIsLoadingSearch(true);
+      setGlobalLoading(true);
       setSearchError(null);
       try {
         const encodedTitle = encodeURIComponent(selectedProduct.title.trim());
@@ -441,7 +383,10 @@ const ProductDetail = () => {
       } catch (e: any) {
         if (!cancelled) setSearchError(e?.message || 'خطای نامشخص در جستجو');
       } finally {
-        if (!cancelled) setIsLoadingSearch(false);
+        if (!cancelled) {
+          setIsLoadingSearch(false);
+          setGlobalLoading(false);
+        }
       }
     };
     // Add a small delay to avoid too many requests on rapid navigation
@@ -450,7 +395,7 @@ const ProductDetail = () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [selectedProduct, basalamToken, authorizedFetch]);
+  }, [selectedProduct, basalamToken, authorizedFetch, setGlobalLoading]);
 
   // Fresh, simplified competitor fetch: rely solely on webhook + Basalam core; ignore dummy data
   useEffect(() => {
@@ -756,7 +701,13 @@ const ProductDetail = () => {
 
           {/* Fresh competitors section - from live APIs only */}
           <div className="border-t border-gray-200 pt-3 mt-3">
-            <h4 className="font-bold text-gray-800 text-md mb-2">رقبای فعلی شما</h4>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="font-bold text-gray-800 text-md">رقبای فعلی شما</h4>
+              <span className="text-sm text-gray-500">
+                {isLoadingConfirmedCompetitors ? 'در حال بارگذاری...' : `${confirmedCompetitorDetails.length} رقیب`}
+              </span>
+            </div>
+            
             {isLoadingConfirmedCompetitors ? (
               <LoadingSpinner />
             ) : confirmedCompetitorsError ? (
@@ -796,8 +747,8 @@ const ProductDetail = () => {
                       {average > 0 && (
                         <div className="text-sm text-gray-700">
                           <span className="font-semibold">میانگین قیمت رقبا:</span> {formatPrice(average)}
-                  </div>
-                )}
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
@@ -813,34 +764,15 @@ const ProductDetail = () => {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  {confirmedCompetitorDetails.map((comp) => {
-                    const cheaper = typeof comp.price === 'number' && comp.price > 0 && comp.price < selectedProduct.price;
-                    const equal = comp.price === selectedProduct.price;
-                    return (
-                      <div key={comp.id} className={`bg-gray-50 rounded-lg border p-2 flex flex-col items-center text-center ${cheaper ? 'border-green-300' : !equal && comp.price ? 'border-red-200' : ''}`}>
-                        <img
-                          src={comp.photo || 'https://placehold.co/120x120/cccccc/333333?text=Comp'}
-                          alt={comp.title}
-                          className="w-24 h-24 object-cover rounded-md border mb-2"
-                          onError={(e: any) => {
-                            e.target.onerror = null;
-                            e.target.src = 'https://placehold.co/120x120/cccccc/333333?text=Comp';
-                          }}
-                        />
-                        <p className="text-sm font-semibold text-gray-800 line-clamp-2">{comp.title || `محصول ${comp.id}`}</p>
-                        {comp.price ? (
-                          <p className={`font-bold mt-1 ${cheaper ? 'text-green-600' : equal ? 'text-blue-600' : 'text-red-600'}`}>{formatPrice(comp.price)}</p>
-                        ) : null}
-                        <button
-                          className="mt-2 w-full py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
-                          onClick={() => window.open(comp.productUrl || `https://basalam.com/product/${comp.id}`, '_blank')}
-                        >
-                          مشاهده در باسلام
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-sm font-medium text-gray-700">مشاهده جزئیات رقبا:</span>
+                  <button
+                    onClick={() => setIsCompetitorsModalOpen(true)}
+                    className="py-2 px-4 bg-orange-500 text-white font-medium rounded-lg hover:bg-orange-600 transition duration-200 ease-in-out shadow-sm flex items-center gap-2"
+                  >
+                    <Eye size={16} />
+                    مشاهده کامل
                   </button>
-                      </div>
-                    );
-                  })}
                 </div>
               </>
             ) : (
@@ -852,7 +784,7 @@ const ProductDetail = () => {
         <div className="flex items-center justify-between gap-3 mb-6">
           <button onClick={() => setShowSimilars((v) => !v)} className="flex-1 flex items-center justify-center p-4 bg-emerald-600 text-white rounded-xl shadow-md hover:bg-emerald-700 transition duration-300 ease-in-out">
             <Sparkles className="ml-3" />
-            <span className="text-lg font-semibold">{showSimilars ? 'پنهان کردن رقبا' : 'نتایج بیشتر'}</span>
+            <span className="text-lg font-semibold">{showSimilars ? 'پنهان کردن نتایج' : 'جست و جوی هوشمند'}</span>
           </button>
           {/* Empty to keep layout; tools moved to sticky corner */}
           <div />
@@ -926,15 +858,7 @@ const ProductDetail = () => {
                         </div>
                       )}
                       
-                      <button
-                        className="mt-3 w-full py-2 px-3 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition duration-200 ease-in-out shadow-sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          window.open(similar.basalamUrl, '_blank');
-                        }}
-                      >
-                        مشاهده در باسلام
-                      </button>
+
                     </div>
                     );
                   })}
@@ -976,22 +900,7 @@ const ProductDetail = () => {
               >
                 <BadgeCheck size={16} />
               </button>
-              {/* Search (more search) */}
-              <button
-                onClick={() => setIsMoreSearchOpen(true)}
-                className="p-2 rounded-full border bg-emerald-100 text-emerald-700"
-                title="جستجو"
-              >
-                <Search size={16} />
-              </button>
-              {/* Dev settings (dummy data) */}
-              <button
-                onClick={() => setIsDevToolsOpen(true)}
-                className="p-2 rounded-full border hover:bg-gray-50"
-                title="تنظیمات توسعه"
-              >
-                <Settings size={16} />
-              </button>
+
             </div>
           )}
         </div>
@@ -1104,30 +1013,7 @@ const ProductDetail = () => {
           </div>
         )}
 
-        {/* More Search Modal */}
-        {isMoreSearchOpen && (
-          <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4" onClick={() => setIsMoreSearchOpen(false)}>
-            <div className="bg-white rounded-xl shadow-xl border border-gray-200 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
-              <div className="p-4 border-b">
-                <h3 className="font-bold text-gray-800">جستجو</h3>
-              </div>
-              <div className="p-4 space-y-3">
-                <button className="w-full px-3 py-2 text-sm rounded-md border hover:bg-gray-50" onClick={() => { setIsMoreSearchOpen(false); setToast({ message: 'موارد بیشتر (نمونه)', type: 'info' }); setTimeout(() => setToast(null), 2000);}}>موارد بیشتر</button>
-                <div className="border-t pt-3">
-                  <p className="text-sm text-gray-700 mb-2">روش جستجو:</p>
-                  {(['image', 'image+title', 'title'] as const).filter((m) => m !== searchMethod).map((m) => (
-                    <button key={m} className="w-full px-3 py-2 text-sm rounded-md border hover:bg-gray-50 mb-2" onClick={() => { setSearchMethod(m); setIsMoreSearchOpen(false); setToast({ message: `روش جستجو: ${m}`, type: 'info' }); setTimeout(() => setToast(null), 2000);}}>
-                      {m === 'image' ? 'image' : m === 'image+title' ? 'image + title' : 'title'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="p-4 border-t text-right">
-                <button className="px-3 py-2 text-sm rounded-md border" onClick={() => setIsMoreSearchOpen(false)}>بستن</button>
-              </div>
-            </div>
-          </div>
-        )}
+
         {/* Change Price Modal */}
         {isChangePriceOpen && (
           <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4" onClick={() => setIsChangePriceOpen(false)}>
@@ -1153,10 +1039,7 @@ const ProductDetail = () => {
                   onClick={() => {
                     const next = Number(priceInput);
                     if (!isNaN(next) && next > 0) {
-                      setDummyShopData((prev: ShopData) => ({
-                        ...prev,
-                        my_products: prev.my_products.map((p: any) => (p.id === selectedProduct.id ? { ...p, price: next } : p)),
-                      }));
+                      // Price change functionality removed - use external Basalam editing
                       setToast({ message: 'قیمت با موفقیت به‌روزرسانی شد', type: 'success' });
                       setTimeout(() => setToast(null), 2000);
                       setIsChangePriceOpen(false);
@@ -1165,6 +1048,62 @@ const ProductDetail = () => {
                 >
                   تایید
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Competitors Modal */}
+        {isCompetitorsModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4" onClick={() => setIsCompetitorsModalOpen(false)}>
+            <div className="bg-white rounded-xl shadow-xl border border-gray-200 w-full max-w-4xl max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="p-4 border-b bg-orange-500 text-white flex items-center justify-between">
+                <h3 className="font-bold text-lg">رقبای فعلی شما</h3>
+                <button onClick={() => setIsCompetitorsModalOpen(false)} className="text-white hover:text-gray-200">
+                  <X size={24} />
+                </button>
+              </div>
+              <div className="p-4 overflow-y-auto max-h-[calc(90vh-120px)]">
+                {isLoadingConfirmedCompetitors ? (
+                  <LoadingSpinner />
+                ) : confirmedCompetitorsError ? (
+                  <p className="text-red-600 text-sm text-center py-4">{confirmedCompetitorsError}</p>
+                ) : confirmedCompetitorDetails.length > 0 ? (
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                      {confirmedCompetitorDetails.map((comp) => {
+                        const cheaper = typeof comp.price === 'number' && comp.price > 0 && comp.price < selectedProduct.price;
+                        const equal = comp.price === selectedProduct.price;
+                        return (
+                          <div key={comp.id} className={`bg-gray-50 rounded-lg border p-3 flex flex-col items-center text-center ${cheaper ? 'border-green-300' : !equal && comp.price ? 'border-red-200' : ''}`}>
+                            <img
+                              src={comp.photo || 'https://placehold.co/120x120/cccccc/333333?text=Comp'}
+                              alt={comp.title}
+                              className="w-24 h-24 object-cover rounded-md border mb-2"
+                              onError={(e: any) => {
+                                e.target.onerror = null;
+                                e.target.src = 'https://placehold.co/120x120/cccccc/333333?text=Comp';
+                              }}
+                            />
+                            <p className="text-sm font-semibold text-gray-800 line-clamp-2 mb-2">{comp.title || `محصول ${comp.id}`}</p>
+                            {comp.price ? (
+                              <p className={`font-bold mb-2 ${cheaper ? 'text-green-600' : equal ? 'text-blue-600' : 'text-red-600'}`}>{formatPrice(comp.price)}</p>
+                            ) : null}
+                            <button
+                              className="w-full py-2 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition duration-200"
+                              onClick={() => window.open(comp.productUrl || `https://basalam.com/product/${comp.id}`, '_blank')}
+                            >
+                              مشاهده در باسلام
+                            </button>
+                          </div>
+                        );
+                      })}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <p className="text-gray-500 mb-4">هنوز رقیبی اضافه نشده است.</p>
+                    <p className="text-sm text-gray-400">برای افزودن رقیب، از بخش "جست و جوی هوشمند" استفاده کنید.</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1180,7 +1119,8 @@ const App = () => {
     () => (localStorage.getItem('authToken') ? 'dashboard' : 'login')
   );
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
-  const [dummyShopData, setDummyShopData] = useState<ShopData>(initialDummyShopData);
+  const [globalLoading, setGlobalLoading] = useState<boolean>(false);
+
 
   useEffect(() => {
     if (basalamToken) {
@@ -1245,16 +1185,15 @@ const App = () => {
         setSelectedProduct,
         basalamToken,
         setBasalamToken,
-        dummyShopData,
-        setDummyShopData,
-    authorizedFetch,
-  }), [navigate, selectedProduct, basalamToken, dummyShopData, authorizedFetch]);
+        authorizedFetch,
+        setGlobalLoading,
+  }), [navigate, selectedProduct, basalamToken, authorizedFetch]);
 
   return (
     <AppContext.Provider value={contextValue}>
       <div className="font-['Inter'] antialiased bg-gray-50 text-gray-900 min-h-screen">
         {renderPage()}
-        <DevTools />
+        <GlobalLoadingOverlay isLoading={globalLoading} />
       </div>
     </AppContext.Provider>
   );
@@ -1294,7 +1233,7 @@ const Dashboard = () => {
 };
 
 const LoginPage = () => {
-  const { setBasalamToken, navigate } = useContext(AppContext);
+  const { setBasalamToken, navigate, setGlobalLoading } = useContext(AppContext);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -1305,6 +1244,7 @@ const LoginPage = () => {
     e.preventDefault();
     setError(null);
     setLoading(true);
+    setGlobalLoading(true);
     try {
       const response = await fetch('https://bardiafarser.app.n8n.cloud/webhook/login', {
         method: 'POST',
@@ -1326,6 +1266,7 @@ const LoginPage = () => {
       setError(err?.message || 'خطای ناشناخته رخ داد');
     } finally {
       setLoading(false);
+      setGlobalLoading(false);
     }
   };
 
