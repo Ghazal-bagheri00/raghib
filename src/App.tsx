@@ -351,6 +351,10 @@ const ProductDetail = () => {
   const [isLoadingConfirmedCompetitors, setIsLoadingConfirmedCompetitors] = useState(false);
   const [confirmedCompetitorsError, setConfirmedCompetitorsError] = useState<string | null>(null);
   const competitorDetailCacheRef = useRef<Map<number, ConfirmedCompetitorDetail>>(new Map());
+  // Track loading state for adding competitors
+  const [addingCompetitorIds, setAddingCompetitorIds] = useState<Set<string>>(new Set());
+  // Refresh trigger for confirmed competitors
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   // Load hidden list per product from localStorage
   useEffect(() => {
     if (!selectedProduct) return;
@@ -403,6 +407,7 @@ const ProductDetail = () => {
       photo_id: primaryPhoto,
       description,
       basalamUrl,
+      vendorIdentifier, // Include vendor identifier for API calls
       isCompetitor: false, // Default to false, can be toggled
       createdAt: new Date().toISOString(),
     } as any;
@@ -429,7 +434,7 @@ const ProductDetail = () => {
           const message = (data && (data.message || data.error)) || 'خطا در جستجوی محصولات مشابه';
           throw new Error(message);
         }
-        const products = Array.isArray(data?.products) ? data.products.map(mapSearchProduct).filter(p => p.id && p.title) : [];
+        const products = Array.isArray(data?.products) ? data.products.map(mapSearchProduct).filter((p: any) => p.id && p.title) : [];
         if (!cancelled) {
           setSearchResults(products);
         }
@@ -517,7 +522,7 @@ const ProductDetail = () => {
     };
     run();
     return () => { cancelled = true; };
-  }, [authorizedFetch, basalamToken, selectedProduct]);
+  }, [authorizedFetch, basalamToken, selectedProduct, refreshTrigger]);
 
   // (competitor preview chips removed)
 
@@ -545,14 +550,75 @@ const ProductDetail = () => {
     return () => observer.disconnect();
   }, [showSimilars]);
 
-  const addAsCompetitor = (similarProduct: any) => {
-    setSearchResults((prevResults) => 
-      prevResults.map((s: any) =>
-        s.id === similarProduct.id ? { ...s, isCompetitor: !s.isCompetitor } : s
-      )
-    );
-    setToast({ message: `وضعیت رقیب برای "${similarProduct.title}" تغییر کرد`, type: 'success' });
-    setTimeout(() => setToast(null), 2000);
+  const addAsCompetitor = async (similarProduct: any) => {
+    if (!selectedProduct?.id || !similarProduct?.id || !similarProduct?.vendorIdentifier) {
+      setToast({ message: 'اطلاعات محصول ناقص است', type: 'error' });
+      setTimeout(() => setToast(null), 2000);
+      return;
+    }
+
+    const productId = similarProduct.id;
+    
+    // Check if already adding this competitor
+    if (addingCompetitorIds.has(productId)) {
+      return;
+    }
+
+    try {
+      // Add to loading set
+      setAddingCompetitorIds(prev => new Set([...prev, productId]));
+
+      const requestBody = {
+        self_product: Number(selectedProduct.id),
+        op_product: Number(similarProduct.id),
+        op_vendor: similarProduct.vendorIdentifier
+      };
+
+      const response = await authorizedFetch('https://bardiafarser.app.n8n.cloud/webhook/competitors', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      let data: any = null;
+      try { 
+        data = await response.json(); 
+      } catch {}
+
+      if (!response.ok) {
+        const message = (data && (data.message || data.error)) || 'خطا در افزودن رقیب';
+        throw new Error(message);
+      }
+
+      // Update the visual state to show it's been added
+      setSearchResults((prevResults) => 
+        prevResults.map((s: any) =>
+          s.id === similarProduct.id ? { ...s, isCompetitor: true } : s
+        )
+      );
+
+      setToast({ message: `"${similarProduct.title}" به عنوان رقیب اضافه شد`, type: 'success' });
+      setTimeout(() => setToast(null), 3000);
+
+      // Refresh confirmed competitors list after a short delay
+      setTimeout(() => {
+        // Trigger a re-fetch by updating the refresh trigger
+        setRefreshTrigger(prev => prev + 1);
+      }, 1000);
+
+    } catch (error: any) {
+      setToast({ message: error?.message || 'خطا در افزودن رقیب', type: 'error' });
+      setTimeout(() => setToast(null), 3000);
+    } finally {
+      // Remove from loading set
+      setAddingCompetitorIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(productId);
+        return newSet;
+      });
+    }
   };
 
   const sortedSimilars = searchResults
@@ -803,13 +869,20 @@ const ProductDetail = () => {
                 <p className="text-red-600 text-sm text-center py-4">{searchError}</p>
               ) : sortedSimilars.length > 0 ? (
                 <div className="grid grid-cols-2 gap-4">
-                  {sortedSimilars.slice(0, visibleSimilarsCount).map((similar: any, idx: number) => (
+                  {sortedSimilars.slice(0, visibleSimilarsCount).map((similar: any, idx: number) => {
+                    const isLoading = addingCompetitorIds.has(similar.id);
+                    const isAdded = similar.isCompetitor;
+                    return (
                     <div
                       key={similar.id}
-                      onClick={() => addAsCompetitor(similar)}
+                      onClick={() => !isLoading && !isAdded && addAsCompetitor(similar)}
                       data-similar-id={similar.id}
-                      className={`relative bg-gray-100 rounded-xl overflow-hidden flex flex-col items-center justify-between p-3 transition-all duration-300 ease-in-out cursor-pointer border ${
-                        similar.isCompetitor ? 'border-2 border-red-500 shadow-[0_0_0_2px_rgba(239,68,68,0.2),0_10px_25px_-5px_rgba(239,68,68,0.5)]' : 'border-gray-200 hover:shadow-md hover:scale-[1.02]'
+                      className={`relative bg-gray-100 rounded-xl overflow-hidden flex flex-col items-center justify-between p-3 transition-all duration-300 ease-in-out ${
+                        isLoading ? 'cursor-wait opacity-70' : isAdded ? 'cursor-default' : 'cursor-pointer'
+                      } border ${
+                        isAdded ? 'border-2 border-green-500 shadow-[0_0_0_2px_rgba(34,197,94,0.2),0_10px_25px_-5px_rgba(34,197,94,0.5)]' : 
+                        isLoading ? 'border-2 border-blue-500 shadow-[0_0_0_2px_rgba(59,130,246,0.2),0_10px_25px_-5px_rgba(59,130,246,0.5)]' :
+                        'border-gray-200 hover:shadow-md hover:scale-[1.02]'
                       }`}
                     >
                       <img
@@ -836,6 +909,23 @@ const ProductDetail = () => {
                       </button>
                       <h4 className="text-center text-sm font-semibold text-gray-800 mb-1 line-clamp-2">{similar.title}</h4>
                       <p className="text-emerald-600 font-bold text-base">{formatPrice(similar.price)}</p>
+                      
+                      {/* Loading or status overlay */}
+                      {isLoading && (
+                        <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
+                          <div className="flex flex-col items-center gap-2">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
+                            <span className="text-xs text-blue-600 font-medium">در حال افزودن...</span>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {isAdded && (
+                        <div className="absolute top-2 right-2 bg-green-500 text-white px-2 py-1 rounded-full text-xs font-medium">
+                          ✓ اضافه شد
+                        </div>
+                      )}
+                      
                       <button
                         className="mt-3 w-full py-2 px-3 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition duration-200 ease-in-out shadow-sm"
                         onClick={(e) => {
@@ -846,7 +936,8 @@ const ProductDetail = () => {
                         مشاهده در باسلام
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
                   <div ref={sentinelRef} className="col-span-full h-1"></div>
                 </div>
               ) : (
