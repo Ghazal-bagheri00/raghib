@@ -1,14 +1,8 @@
 {
-  "platform": "react",
-  "app": "raghib-gemini",
-  "buildCommand": "npx tsc --noEmit && npx vite build",
-  "publishDir": "dist",
-  "node": {
-    "version": "18"
-  },
+  "app": "raghib",
+  "port": 80,
   "build": {
-    "args": {
-      "NODE_OPTIONS": "--max_old_space_size=2048"
-    }
-  }
+    "location": "iran"
+  },
+  "disks": []
 }
