@@ -154,7 +154,7 @@ const MyProducts = () => {
       setGlobalLoading(true);
       setApiError(null);
       try {
-        const res = await authorizedFetch('https://bardiafarser.app.n8n.cloud/webhook/my-products');
+        const res = await authorizedFetch('https://n8nstudent.dotavvab.com/webhook/my-products');
         let data: any = null;
         try { data = await res.json(); } catch {}
         if (!res.ok) {
@@ -368,7 +368,7 @@ const ProductDetail = () => {
       try {
         const encodedTitle = encodeURIComponent(selectedProduct.title.trim());
         const productId = encodeURIComponent(String(selectedProduct.id));
-        const url = `https://bardiafarser.app.n8n.cloud/webhook/mlt-search?title=${encodedTitle}&product_id=${productId}&page=1`;
+        const url = `https://n8nstudent.dotavvab.com/webhook/mlt-search?title=${encodedTitle}&product_id=${productId}&page=1`;
         const res = await authorizedFetch(url);
         let data: any = null;
         try { data = await res.json(); } catch {}
@@ -427,7 +427,7 @@ const ProductDetail = () => {
       setIsLoadingConfirmedCompetitors(true);
       setConfirmedCompetitorsError(null);
       try {
-        const url = `https://bardiafarser.app.n8n.cloud/webhook/competitors?product_id=${productId}`;
+        const url = `https://n8nstudent.dotavvab.com/webhook/competitors?product_id=${productId}`;
         const res = await authorizedFetch(url);
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error((data && (data.message || data.error)) || 'خطا در دریافت رقبا');
@@ -444,7 +444,7 @@ const ProductDetail = () => {
           while (idx < toFetch.length && !cancelled) {
             const current = toFetch[idx++];
             try {
-              const r = await fetch(`https://bardiafarser.app.n8n.cloud/webhook/product?id=${current.op_product}`);
+              const r = await fetch(`https://n8nstudent.dotavvab.com/webhook/product?id=${current.op_product}`);
               const d = await r.json().catch(() => ({}));
               const parsed = parseCoreDetail(d);
               parsed.vendorIdentifier = current.op_vendor;
@@ -519,7 +519,7 @@ const ProductDetail = () => {
         op_vendor: similarProduct.vendorIdentifier
       };
 
-      const response = await authorizedFetch('https://bardiafarser.app.n8n.cloud/webhook/competitors', {
+      const response = await authorizedFetch('https://n8nstudent.dotavvab.com/webhook/competitors', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1246,7 +1246,7 @@ const LoginPage = () => {
     setLoading(true);
     setGlobalLoading(true);
     try {
-      const response = await fetch('https://bardiafarser.app.n8n.cloud/webhook/login', {
+      const response = await fetch('https://n8nstudent.dotavvab.com/webhook/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
